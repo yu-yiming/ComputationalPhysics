@@ -1,0 +1,9 @@
+{
+    "files.associations": {
+        "type_traits": "cpp",
+        "vector": "cpp",
+        "xmemory": "cpp",
+        "xstddef": "cpp",
+        "stdexcept": "cpp"
+    }
+}
