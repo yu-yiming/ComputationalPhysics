@@ -105,8 +105,8 @@ public:
     }
 
     template<typename F>
-    void markov_chain_monte_carlo(F&& callback) {
-        auto const k_sweep_limit = 10000;
+    void markov_chain_monte_carlo(F&& callback, int sweep_limit = 10000) {
+        auto const k_sweep_limit = sweep_limit;
         auto const k_spin_size = m_spins.size();
 
         for (int sweep = 0; sweep < k_sweep_limit; ++sweep) {
