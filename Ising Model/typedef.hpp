@@ -7,7 +7,10 @@ enum struct spin_t {
 template<typename SpinT>
 struct SpinTrait {
     static constexpr double values[] = { 0.0 };
-    static constexpr double of(SpinT spin) {
+    static constexpr std::size_t state_count() noexcept {
+        return 1;
+    }
+    static constexpr double of(SpinT spin) noexcept {
         return 0.0;
     }
     static constexpr SpinT from(double val) {
@@ -16,25 +19,36 @@ struct SpinTrait {
         }
         throw std::invalid_argument("Spin value doesn't match any valid state.");
     }
+    static constexpr int index(SpinT spin) {
+        return 0;
+    }
 };
 
 template<>
 struct SpinTrait<spin_t> {
+    using enum spin_t;
+
     static constexpr double values[] = { 1.0, -1.0 };
+    static constexpr std::size_t state_count() noexcept {
+        return 2;
+    }
     static constexpr spin_t invalid_state() {
-        return spin_t::k_invalid;
+        return k_invalid;
     }
     static constexpr double of(spin_t spin) {
-        return spin == spin_t::k_up ? 1.0 : spin == spin_t::k_down ? -1.0 : 0.0;
+        return spin == k_up ? 1.0 : spin == k_down ? -1.0 : 0.0;
     }
     static constexpr spin_t from(double val) {
         if (val == 1.0) {
-            return spin_t::k_up;
+            return k_up;
         }
         else if (val == -1.0) {
-            return spin_t::k_down;
+            return k_down;
         }
         throw std::invalid_argument("Spin value doesn't match any valid state.");
+    }
+    static constexpr int index(spin_t spin) {
+        return spin == k_up ? 1 : 0;
     }
 };
 
@@ -55,6 +69,6 @@ SpinT random_spin() {
     return arr[0];
 }
 
-
+using node_t = int;
 using energy_t = double;
 using field_t = double;
