@@ -11,6 +11,10 @@
 
 namespace stdv = std::ranges::views;
 
+/**
+ * @brief A constant related with T, the temperature of the system.
+ * beta = 1/(kT), where k is the Boltzmann's constant. We'd prefer to let k = 1 (in some proper unit)
+ */
 extern double beta;
 
 /**
@@ -102,6 +106,11 @@ public:
 
     int64_t state() const noexcept {
         return m_state;
+    }
+
+    void stablize() {
+        auto const k_stable_sweep_ct = 10;
+        this->markov_chain_monte_carlo([](auto&& self){}, k_stable_sweep_ct);
     }
 
     template<typename F>
