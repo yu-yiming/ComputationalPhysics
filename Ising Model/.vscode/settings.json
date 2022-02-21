@@ -4,6 +4,9 @@
         "vector": "cpp",
         "xmemory": "cpp",
         "xstddef": "cpp",
-        "stdexcept": "cpp"
+        "stdexcept": "cpp",
+        "filesystem": "cpp",
+        "optional": "cpp",
+        "cmath": "cpp"
     }
 }
