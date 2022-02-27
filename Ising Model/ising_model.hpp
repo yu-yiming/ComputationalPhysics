@@ -124,7 +124,7 @@ public:
      */
     void stablize() {
         auto const k_stable_sweep_ct = 10;
-        this->template markov_chain_monte_carlo(pass, k_stable_sweep_ct);
+        this->markov_chain_monte_carlo(pass, k_stable_sweep_ct);
     }
 
     template<typename F>
