@@ -5,7 +5,7 @@
 #include "utility.hpp"
 
 enum struct spin_t : int8_t {
-    k_up, k_down, k_invalid
+    k_down, k_up, k_invalid
 };
 
 template<typename SpinT>
@@ -40,8 +40,8 @@ template<>
 struct SpinTraits<spin_t> {
     using enum spin_t;
 
-    static constexpr double values[] = { 1.0, -1.0 };
-    static constexpr char const* name[] = { "up", "down", "error" };
+    static constexpr double values[] = { -1.0, 1.0 };
+    static constexpr char const* name[] = { "down", "up", "error" };
 
     static constexpr std::size_t state_count() noexcept {
         return 2;
@@ -67,16 +67,6 @@ struct SpinTraits<spin_t> {
     static constexpr int index(spin_t spin) {
         return spin == k_up ? 0 : spin == k_down ? 1 : 2;
     }
-};
-
-template<typename SpinT>
-struct SpinPermutation {
-    static inline SpinT values[] = { 0 };
-};
-
-template<>
-struct SpinPermutation<spin_t> {
-    static inline spin_t values[] = { spin_t::k_up, spin_t::k_down };
 };
 
 template<typename SpinT>
