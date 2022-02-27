@@ -2,3 +2,8 @@
 Quantum Computing/.ipynb_checkpoints/quantum_computing-checkpoint.ipynb
 .DS_Store
 *.circuit
+/ComputationalPhysics/.vs/ComputationalPhysics/v17
+/ComputationalPhysics
+.vs/ProjectSettings.json
+.vs/slnx.sqlite
+.vs/VSWorkspaceState.json
