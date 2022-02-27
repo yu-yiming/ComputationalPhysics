@@ -1,14 +1,32 @@
 #pragma once
+#include <cstdlib>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <string>
 
+#ifdef __APPLE__
+#   include <unistd.h>
+#elif _WIN32 defined
+#   include <direct.h>
+#   define chdir _chdir
+#endif
+
 #include "ising_model.hpp"
 
+namespace stdf = std::filesystem;
+
+constexpr char const* k_cat = "cat";
+constexpr char const* k_cd = "cd";
+constexpr char const* k_dir = "dir";
+constexpr char const* k_echo = "echo";
 constexpr char const* k_evolve = "evolve";
 constexpr char const* k_exit = "exit";
 constexpr char const* k_hist = "hist";
 constexpr char const* k_init = "init";
+constexpr char const* k_ls = "ls";
+constexpr char const* k_path = "path";
+constexpr char const* k_reset = "reset";
 constexpr char const* k_show = "show";
 
 inline void println(std::string_view sv, std::ostream& out = std::cout) {
@@ -16,6 +34,13 @@ inline void println(std::string_view sv, std::ostream& out = std::cout) {
 }
 
 inline void prompt() {
+    auto const non_quote = [](auto arg) {
+        return arg != '"';
+    };
+    std::string&& path = stdf::current_path().filename().string();
+    for (auto ch : path | stdv::filter(non_quote)) {
+        std::cout << ch;
+    }
     std::cout << "> ";
 }
 
@@ -53,6 +78,32 @@ inline void undefined() {
     std::cerr << "\033[1m\033[31mThis function is not yet implemented" << '\n';
 }
 
+inline bool shell_command(std::string_view line, std::vector<std::string_view> const& argv) {
+    auto const match_prefix = [](std::string_view target, std::string_view pattern) {
+        if (target.size() < pattern.size()) {
+            return false;
+        }
+        return target.substr(0, pattern.size()) == pattern 
+            && (target.size() == pattern.size() || target[pattern.size()] == ' ');
+    };
+
+    auto const is_shell_command = argv[0] == k_cat 
+                               || argv[0] == k_cd 
+                               || argv[0] == k_dir 
+                               || argv[0] == k_echo 
+                               || argv[0] == k_ls;
+
+    if (is_shell_command) {
+        if (argv[0] == k_cd) {
+            chdir(argv[1].data());
+        }
+        else {
+            system(line.data());
+        }
+    }
+    return is_shell_command;
+}
+
 [[noreturn]]
 inline void repl() {
     extern Ising g_model;
@@ -62,10 +113,15 @@ inline void repl() {
     std::string line;
     
     while (std::getline(std::cin, line)) {
-        if (line == k_exit) {
-            std::cout << std::endl;
+        if (line == "") {
+            prompt();
+            continue;
+        }
+        else if (line == k_exit) {
+            std::cout << "Now exit the REPL." << std::endl;
             std::exit(0);
         }
+
         // Parse the line. (we need std::ranges::to !)
         auto view = line | stdv::split(' ')
                          | stdv::transform([](auto&& range) { return std::string_view(&*range.begin(), std::ranges::distance(range)); })
@@ -76,13 +132,25 @@ inline void repl() {
             print_usage();
             goto prompt;
         }
+
+        // Do it if it's system commands.
+        if (shell_command(line, command)) {
+            goto prompt;
+        }
+
         // init [spins_file] [bond_file]
-        else if (command[0] == k_init) {
+        if (command[0] == k_init) {
             if (command.size() != 3) {
                 print_usage();
                 goto prompt;
             }
             g_model = make_ising(command[1], command[2]);
+            goto prompt;
+        }
+        else if (command[0] == k_path) {
+            auto const path = stdf::absolute(stdf::current_path());
+            std::cout << path << '\n';
+            goto prompt;
         }
 
         // check validity of the global Ising model.
@@ -102,32 +170,51 @@ inline void repl() {
         // show [options]
         else if (command[0] == k_show) {
             bool show_energy = false;
-            bool show_string = false;
-            bool show_flip = false;
+            bool show_config = false;
+            bool show_state = false;
+
+            if (command.size() == 1) {
+                show_energy = show_config = show_state = true;
+            }
 
             for (auto opt : command | stdv::drop(1)) {
                 auto const opt_name = opt.substr(1);
                 if (opt_name == "e") {
                     show_energy = true;
                 }
-                else if (opt_name == "s") {
-                    show_string = true;
+                else if (opt_name == "c") {
+                    show_config = true;
                 }
-                else if (opt_name == "f") {
-                    show_flip = true;
+                else if (opt_name == "s") {
+                    show_state = true;
                 }
             }
 
             auto const energy = g_model.energy();
-
+            auto const state = g_model.state();
+            if (show_config) {
+                std::cout << g_model << '\n';
+            }
+            if (show_energy) {
+                std::cout << "The energy of this configuration is: " << energy << '\n';
+            }
+            if (show_state) {
+                std::cout << "The state of this configuration is: " << state << '\n';
+            }
         }
         // evolve [sweep_count]
         else if (command[0] == k_evolve) {
             if (command.size() > 3) {
                 print_usage();
-                prompt;
+                goto prompt;
             }
             g_model.stablize();
+            
+            if (command.size() == 3) {
+                auto const sweep_count = std::atoi(command[2].data());
+                g_model.markov_chain_monte_carlo([](auto&& self) {}, sweep_count);
+                goto prompt;
+            }
             g_model.markov_chain_monte_carlo([](auto&& self) {});
         }
         else {
