@@ -30,6 +30,8 @@ class BasicIsing {
 public:
     using STraits = SpinTraits<SpinT>;
 
+    static inline auto const pass = [](auto&& self) {};
+
     BasicIsing() noexcept
         : m_valid(false) {}
 
@@ -51,12 +53,16 @@ public:
             spin = random_spin<SpinT>();
             m_state *= base;
             m_state += STraits::index(spin);
+            std::cout << m_state << '\n';
         }
+        // Node indices are 1-indexed in the configuration files.
         for (auto [i, h] : spins) {
+            --i;
             m_fields[i] = h;
             m_energy += STraits::value_of(m_spins[i]) * h;
         }
         for (auto [i, j, e] : bonds) {
+            --i; --j;
             m_neighbors[i].emplace_back(j, e);
             m_neighbors[j].emplace_back(i, e);
             m_energy -= STraits::value_of(m_spins[i]) * STraits::value_of(m_spins[j]) * e;
@@ -118,7 +124,7 @@ public:
      */
     void stablize() {
         auto const k_stable_sweep_ct = 10;
-        this->template markov_chain_monte_carlo([](auto&& self){}, k_stable_sweep_ct);
+        this->template markov_chain_monte_carlo(pass, k_stable_sweep_ct);
     }
 
     template<typename F>
@@ -142,38 +148,39 @@ public:
     friend std::ostream& operator <<(std::ostream& os, BasicIsing<SpinU, EnergyU, FieldU> const& ising) {
         using STraits = SpinTraits<SpinT>;
         int ct{};
-        os << "----------------------------------------------" << '\n'
-           << "                    Spins                     " << '\n'
-           << "----------------------------------------------" << '\n';
+        os << "--------------------------------------------------------------" << '\n'
+           << "                            Spins                             " << '\n'
+           << "--------------------------------------------------------------" << '\n';
         for (auto spin : ising.m_spins) {
             os << ++ct << " : " << std::setw(8) << std::left << STraits::name_of(spin);
-            if (ct >= 16) {
+            if (ct >= 5) {
                 os << '\n';
                 ct = 0;
             }
         }
+        os << '\n';
         ct = 0;
-        os << "----------------------------------------------" << '\n'
-           << "                   Fields                     " << '\n'
-           << "----------------------------------------------" << '\n';
+        os << "--------------------------------------------------------------" << '\n'
+           << "                            Fields                            " << '\n'
+           << "--------------------------------------------------------------" << '\n';
         for (auto f : ising.m_fields) {
             os << ++ct << " : " << std::setw(8) << std::left << f;
-            if (ct >= 32) {
+            if (ct >= 5) {
                 os << '\n';
                 ct = 0;
             }
         }
+        os << '\n';
         ct = 0;
-        os << "----------------------------------------------" << '\n'
-           << "                   Bonds                      " << '\n'
-           << "----------------------------------------------" << '\n';
+        os << "--------------------------------------------------------------" << '\n'
+           << "                            Bonds                             " << '\n'
+           << "--------------------------------------------------------------" << '\n';
         std::vector<std::tuple<node_t, node_t, EnergyT>> bonds;
         node_t i{};
         auto const form_bonds = [&i](auto&& v) {
             ++i;
             return v | stdv::transform([i = i - 1](auto&& pair) {
-                auto const min = std::min(i, pair.first);
-                auto const max = std::max(i, pair.first);
+                auto const [min, max] = std::minmax(i, pair.first);
                 return std::tuple(min, max, pair.second);
             });
         };
@@ -182,9 +189,11 @@ public:
         node_t last_i = -1, last_j = -1;
         for (auto [i, j, e] : view) {
             if (i != last_i || j != last_j) {
-                os << "(" << i << ", " << j << ") : " << e;
+                os << "(" << std::setw(2) << std::left << i << ", "
+                          << std::setw(2) << std::right << j << ") : " 
+                          << std::setw(6) << std::left << e;
             }
-            if (ct >= 8) {
+            if (++ct >= 4) {
                 os << '\n';
                 ct = 0;
             }
@@ -204,7 +213,9 @@ private:
 
 template<typename FieldT>
 std::vector<std::pair<node_t, FieldT>> read_spin_file(std::string_view spin_file) {
-    std::ifstream ifs(spin_file.data());
+    // We need more support for std::string_view !!!!!!!
+    std::ifstream ifs{};
+    ifs.open(std::string(spin_file));
     if (!ifs) {
         throw spin_file;
     }
@@ -228,7 +239,9 @@ std::vector<std::pair<node_t, FieldT>> read_spin_file(std::string_view spin_file
 
 template<typename EnergyT>
 std::vector<std::tuple<node_t, node_t, EnergyT>> read_bond_file(std::string_view bond_file) {
-    std::ifstream ifs(bond_file.data());
+    // We need more support for std::string_view !!!!!!!
+    std::ifstream ifs{};
+    ifs.open(std::string(bond_file));
     if (!ifs) {
         throw bond_file;
     }
