@@ -19,5 +19,14 @@ R randnum(T left, U right) {
     std::default_random_engine eng(rd());
     distribution_t d(left, right);
 
-    return d(eng);
+    R result{};
+
+    while (true) {
+        result = d(eng);
+        if (result != static_cast<R>(right)) {
+            break;
+        }
+    }
+
+    return result;
 }
