@@ -2,8 +2,12 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <numeric>
 #include <ranges>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 #include "spin.hpp"
@@ -11,6 +15,46 @@
 
 namespace stdv = std::ranges::views;
 namespace stdr = std::ranges;
+
+template<typename T>
+struct transpose {};
+
+template<typename... Ts>
+using transpose_t = typename transpose<Ts...>::type;
+
+template <typename... Ts>
+struct transpose<std::tuple<std::vector<Ts>...>> {
+    using type = std::vector<std::tuple<Ts...>>;
+};
+
+template <typename... Ts>
+struct transpose<std::vector<std::tuple<Ts...>>> {
+    using type = std::tuple<std::vector<Ts>...>;
+};
+
+template<typename... Ts>
+static inline std::tuple<Ts&...> ith(size_t i, std::vector<Ts>&... vs){
+    return std::tie(vs[i]...);
+}
+
+template<typename... Ts>
+class Builder {
+public:
+    Builder(std::tuple<Ts&...> const& args)
+        : m_tuple(args) {}
+
+    std::tuple<Ts&...>&& tuple() const {
+        return std::move(m_tuple);
+    }
+
+    template<typename T>
+    auto operator ,(Builder const& other) {
+        return Builder(std::tuple_cat(m_tuple, other.m_tuple));
+    }
+    
+private:
+    std::tuple<Ts&...> m_tuple;
+};
 
 /**
  * @brief A constant related with T, the temperature value_of the system.
@@ -30,7 +74,78 @@ class BasicIsing {
 public:
     using STraits = SpinTraits<SpinT>;
 
+
+    struct EnergyRecorder {
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const{
+            m_energies.push_back(self.m_energy);
+        }
+        auto operator ()() const {
+            auto result = std::move(m_energies);
+            m_energies.clear();
+            return result;
+        }
+    private:
+        mutable std::vector<EnergyT> m_energies;
+    };
+
+    struct StateRecorder {
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const {
+            m_states.push_back(self.m_state);
+        }
+        auto operator ()() const {
+            auto result = std::move(m_states);
+            m_states.clear();
+            return result;
+        }
+    private:
+        mutable std::vector<int64_t> m_states;
+    };
+
+    struct MagnetizationRecorder {
+        using MagnetizationT = double;
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const {
+            auto const ct = self.m_spins.size();
+            auto const sum = std::accumulate(
+                m_spins.cbegin(), m_spins.cend(), 0.0,
+                [](auto partial, auto spin) {
+                    return partial + SpinTraits<SpinT>::value_of(spin);
+                });
+            m_magnetizations.push_back(sum / ct);
+        }
+        auto operator ()() const {
+            auto result = std::move(m_magnetizations);
+            m_magnetizations.clear();
+            return result;
+        }
+
+    private:
+        mutable std::vector<double> m_magnetizations;
+    };
+
+    template<class... Rs>
+    struct Recorder : Rs... {
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const {
+            (Rs::operator ()(self), ...);
+        }
+        auto operator ()() const {
+            auto const tup = (Builder(std::tuple(Rs::operator ()())), ...).tuple();
+            auto result = transpose_t<decltype(tup)>(std::get<0>(tup).size());
+            std::apply(
+                [&result](auto const&... vs) {
+                    for (auto i = 0; i < result.size(); ++i) {
+                        result[i] = ith(i, vs...);
+                    }
+                }, tup);
+            return result;
+        }
+    };
+
     static inline auto const pass = [](auto&& self) {};
+    static inline auto const record_state = StateRecorder{};
+    static inline auto const record_energy = EnergyRecorder{};
+    static inline auto const record_magnetization = MagnetizationRecorder{};
+    template<class... Rs>
+    static inline auto const record = Recorder<Rs...>{};
 
     BasicIsing() noexcept
         : m_valid(false) {}
