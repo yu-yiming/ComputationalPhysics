@@ -16,51 +16,14 @@
 namespace stdv = std::ranges::views;
 namespace stdr = std::ranges;
 
-template<typename T>
-struct transpose {};
-
-template<typename... Ts>
-using transpose_t = typename transpose<Ts...>::type;
-
-template <typename... Ts>
-struct transpose<std::tuple<std::vector<Ts>...>> {
-    using type = std::vector<std::tuple<Ts...>>;
-};
-
-template <typename... Ts>
-struct transpose<std::vector<std::tuple<Ts...>>> {
-    using type = std::tuple<std::vector<Ts>...>;
-};
-
-template<typename... Ts>
-static inline std::tuple<Ts&...> ith(size_t i, std::vector<Ts>&... vs){
-    return std::tie(vs[i]...);
-}
-
-template<typename... Ts>
-class Builder {
-public:
-    Builder(std::tuple<Ts&...> const& args)
-        : m_tuple(args) {}
-
-    std::tuple<Ts&...>&& tuple() const {
-        return std::move(m_tuple);
-    }
-
-    template<typename T>
-    auto operator ,(Builder const& other) {
-        return Builder(std::tuple_cat(m_tuple, other.m_tuple));
-    }
-    
-private:
-    std::tuple<Ts&...> m_tuple;
-};
 
 /**
  * @brief A constant related with T, the temperature value_of the system.
  * g_beta = 1/(kT), where k is the Boltzmann's constant. We'd prefer to let k = 1 (in some proper unit)
  */
 extern double g_beta;
+
+extern energy_t g_bond_energy;
 
 /**
  * @brief A basic Ising model that has a graph structure value_of "weighed" vertices and edges.
@@ -73,10 +36,19 @@ template<typename SpinT, typename EnergyT, typename FieldT>
 class BasicIsing {
 public:
     using STraits = SpinTraits<SpinT>;
+    using This = BasicIsing;
 
+    struct Empty {
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const noexcept {
+            // do nothing
+        }
+        auto operator ()() const {
+            // do nothing
+        }
+    };
 
     struct EnergyRecorder {
-        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const{
+        auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const {
             m_energies.push_back(self.m_energy);
         }
         auto operator ()() const {
@@ -104,13 +76,7 @@ public:
     struct MagnetizationRecorder {
         using MagnetizationT = double;
         auto operator ()(BasicIsing<SpinT, EnergyT, FieldT> const& self) const {
-            auto const ct = self.m_spins.size();
-            auto const sum = std::accumulate(
-                m_spins.cbegin(), m_spins.cend(), 0.0,
-                [](auto partial, auto spin) {
-                    return partial + SpinTraits<SpinT>::value_of(spin);
-                });
-            m_magnetizations.push_back(sum / ct);
+            m_magnetizations.push_back(self.magnetization());
         }
         auto operator ()() const {
             auto result = std::move(m_magnetizations);
@@ -128,7 +94,7 @@ public:
             (Rs::operator ()(self), ...);
         }
         auto operator ()() const {
-            auto const tup = (Builder(std::tuple(Rs::operator ()())), ...).tuple();
+            auto const tup = (Builder(ctie(Rs::operator ()())), ...).tuple();
             auto result = transpose_t<decltype(tup)>(std::get<0>(tup).size());
             std::apply(
                 [&result](auto const&... vs) {
@@ -140,15 +106,84 @@ public:
         }
     };
 
-    static inline auto const pass = [](auto&& self) {};
+    static inline auto const pass = Empty{};
     static inline auto const record_state = StateRecorder{};
     static inline auto const record_energy = EnergyRecorder{};
     static inline auto const record_magnetization = MagnetizationRecorder{};
     template<class... Rs>
     static inline auto const record = Recorder<Rs...>{};
 
+    // TODO
+    // Combine recorders.
+    //template<class... Rs>
+    //static auto make_recorder(Rs&&... rs) {
+    //    using R = rebind_t<
+    //        Recorder, 
+    //        filter_t<
+    //            intersect_t, std::tuple<Rs...>, std::tuple<StateRecorder, EnergyRecorder, MagnetizationRecorder>>>;
+    //    return R{};
+    //}
+
+    static This from_grid(node_t ct, EnergyT bond_energy = 0.0) {
+        return from_grid(ct, ct, bond_energy);
+    }
+
+    /**
+     * @brief Get a simple lattice model
+     * @param row_ct 
+     * @param col_ct 
+     * @param bond_energy 
+     * @return 
+    */
+    static This from_grid(node_t row_ct, node_t col_ct, EnergyT bond_energy = 0.0) {
+        auto const total_ct = row_ct * col_ct;
+        std::vector<std::pair<node_t, FieldT>> spins(total_ct);
+        for (node_t i{}; auto& [n, f] : spins) {
+            n = ++i;
+            f = FieldT{};
+        }
+
+        std::vector<std::tuple<node_t, node_t, EnergyT>> bonds{};
+
+        auto const right = [col_ct](node_t n) {
+            auto const result = n + 1;
+            if (result % col_ct == 0) {
+                return -1;
+            }
+            return result;
+        };
+        auto const down = [col_ct, total_ct](node_t n) {
+            auto const result = n + col_ct;
+            if (result >= total_ct) {
+                return -1;
+            }
+            return result;
+        };
+
+        for (node_t i = 0; i < total_ct; ++i) {
+            auto const r = right(i);
+            if (r >= 0) {
+                bonds.emplace_back(i + 1, r + 1, bond_energy);
+            }
+            auto const d = down(i);
+            if (d >= 0) {
+                bonds.emplace_back(i + 1, d + 1, bond_energy);
+            }
+        }
+
+        return { spins, bonds };
+    }
+
     BasicIsing() noexcept
         : m_valid(false) {}
+
+    BasicIsing(This const& other) = delete;
+
+    BasicIsing(This&& other) = default;
+
+    This& operator =(This const& other) = delete;
+
+    This& operator =(This&& other) = default;
 
     BasicIsing(std::vector<std::pair<node_t, FieldT>> const& spins, std::vector<std::tuple<node_t, node_t, EnergyT>> const& bonds)
         : m_spins(spins.size()), m_fields(spins.size()), m_neighbors(spins.size()), m_energy(0.0), m_state(0), m_valid(true) {
@@ -156,26 +191,45 @@ public:
         this->initialize(spins, bonds);
     }
 
-    void initialize(std::vector<std::pair<node_t, FieldT>> const& spins, std::vector<std::tuple<node_t, node_t, EnergyT>> const& bonds) {
+    /**
+     * @brief Initialize the model from vectors of config data.
+     * Note that the node are specified by 1-indexed integers in accordance with the config files.
+     * @param spins The field information of the model.
+     * @param bonds The bond information
+    */
+    void initialize(std::vector<std::pair<node_t, FieldT>> spins, std::vector<std::tuple<node_t, node_t, EnergyT>> const& bonds) {
         auto const base = STraits::state_count();
+        
+        // make sure the spins are sorted by node number.
+        std::sort(
+            spins.begin(), spins.end(), 
+            [](auto const& p1, auto const& p2) {
+                return p1.first > p2.first ? false : p1.first < p2.first || p1.second < p2.second;
+            });
 
-        auto const spin_count = spins.size();
+        // the count of spins is the largest among their numbers.
+        auto const spin_count = std::accumulate(
+            spins.cbegin(), spins.cend(), node_t{},
+            [](auto max, auto const& pair) { return std::max(max, pair.first); });
+
         m_spins.resize(spin_count);
         m_fields.resize(spin_count);
         m_neighbors.resize(spin_count);
 
+        // initialize the spins with random direction.
         for (auto& spin : m_spins) {
             spin = random_spin<SpinT>();
             m_state *= base;
             m_state += STraits::index(spin);
-            std::cout << m_state << '\n';
+            m_sum += STraits::value_of(spin);
         }
-        // Node indices are 1-indexed in the configuration files.
+        // initialize fields of the spins.
         for (auto [i, h] : spins) {
             --i;
             m_fields[i] = h;
             m_energy += STraits::value_of(m_spins[i]) * h;
         }
+        // initialize bonds between the spins.
         for (auto [i, j, e] : bonds) {
             --i; --j;
             m_neighbors[i].emplace_back(j, e);
@@ -189,12 +243,25 @@ public:
         return m_valid;
     }
 
-    EnergyT delta(node_t n) {
+    /**
+     * @brief Return the change of energy if certain spin is flipped.
+     * Note that this might be illegal for some spin types.
+     * @param n The node represented by a 0-indexed integer.
+     * @return The energy difference.
+     */
+    EnergyT delta(node_t n) noexcept {
         return delta(n, STraits::from_value(-STraits::value_of(m_spins[n])));
     }
 
+    /**
+     * @brief Return the change of energy if certain spin is changed to another direction.
+     * This is a result-cached function so that consecutive calls with same inputs are trivial.
+     * @param n The node represented by a 0-indexed integer.
+     * @param new_spin The new spin.
+     * @return The energy difference.
+     */
     EnergyT delta(node_t n, SpinT new_spin) noexcept {
-        static std::tuple<node_t, SpinT, EnergyT> cache;
+        static auto cache = std::tuple(node_t{ -1 }, SpinT{}, EnergyT{});
         auto& [cached_node, cached_spin, cached_energy] = cache;
 
         if (cached_node == n && cached_spin == new_spin) {
@@ -206,7 +273,7 @@ public:
         auto const spin_delta = STraits::value_of(new_spin) - STraits::value_of(m_spins[n]);
         auto delta = m_fields[n] * spin_delta;
         for (auto [i, e] : m_neighbors[n]) {
-            delta += STraits::value_of(m_spins[i]) * e;
+            delta += STraits::value_of(m_spins[i]) * e * spin_delta;
         }
         cached_energy = delta;
         return delta;
@@ -218,12 +285,13 @@ public:
 
     void flip(node_t n, SpinT new_spin) {
         auto const delta = this->delta(n, new_spin);
-        m_spins[n] = new_spin;
-        m_energy += delta;
-
         auto const spin_delta = STraits::value_of(new_spin) - STraits::value_of(m_spins[n]);
         auto const base = STraits::state_count();
-        m_state += static_cast<int64_t>(std::pow(base, m_spins.size() - n - 1)) * spin_delta;
+
+        m_spins[n] = new_spin;
+        m_energy += delta;
+        m_state += static_cast<int64_t>(std::pow(base, m_spins.size() - n - 1) * spin_delta);
+        m_sum += spin_delta;
     }
 
     EnergyT energy() const noexcept {
@@ -234,6 +302,10 @@ public:
         return m_state;
     }
 
+    double magnetization() const noexcept {
+        return m_sum / m_spins.size();
+    }
+
     /**
      * @brief Stablize the system by performing MCMC several times first.
      */
@@ -242,8 +314,15 @@ public:
         this->markov_chain_monte_carlo(pass, k_stable_sweep_ct);
     }
 
+    /**
+     * @brief Perform the Metropolis-Hastings algorithm which uses Markov chain Monte Carlo (MCMC) method.
+     * It basically choose a random spin and flip at some chance during one of multiple sweeps.
+     * @tparam F A callback type.
+     * @param callback Moniter the model object and do something every sweep, e.g. record the energy of the system.
+     * @param sweep_limit The count of sweeps.
+    */
     template<typename F>
-    void markov_chain_monte_carlo(F&& callback, int sweep_limit = 10000) {
+    void markov_chain_monte_carlo(F&& callback, int sweep_limit = 1000) {
         auto const k_sweep_limit = sweep_limit;
         auto const k_spin_size = m_spins.size();
 
@@ -268,9 +347,8 @@ public:
            << "--------------------------------------------------------------" << '\n';
         for (auto spin : ising.m_spins) {
             os << ++ct << " : " << std::setw(8) << std::left << STraits::name_of(spin);
-            if (ct >= 5) {
+            if (ct % 5 == 0) {
                 os << '\n';
-                ct = 0;
             }
         }
         os << '\n';
@@ -280,9 +358,8 @@ public:
            << "--------------------------------------------------------------" << '\n';
         for (auto f : ising.m_fields) {
             os << ++ct << " : " << std::setw(8) << std::left << f;
-            if (ct >= 5) {
+            if (ct % 5 == 0) {
                 os << '\n';
-                ct = 0;
             }
         }
         os << '\n';
@@ -308,9 +385,8 @@ public:
                           << std::setw(2) << std::right << j << ") : " 
                           << std::setw(6) << std::left << e;
             }
-            if (++ct >= 4) {
+            if (++ct % 4 == 0) {
                 os << '\n';
-                ct = 0;
             }
         }
 
@@ -323,6 +399,7 @@ private:
     std::vector<std::vector<std::pair<node_t, EnergyT>>> m_neighbors;
     EnergyT m_energy;
     int64_t m_state;
+    double m_sum;
     bool m_valid;
 };
 
@@ -330,6 +407,7 @@ template<typename FieldT>
 std::vector<std::pair<node_t, FieldT>> read_spin_file(std::string_view spin_file) {
     // We need more support for std::string_view !!!!!!!
     std::ifstream ifs{};
+    // std::string_view is dangerous since it's not null-terminated!
     ifs.open(std::string(spin_file));
     if (!ifs) {
         throw spin_file;
